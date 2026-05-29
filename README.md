@@ -3,15 +3,15 @@
 `container-probe` is a small forensic CLI that inspects a file and reports the
 most likely encryption container or protocol it matches.
 
-This first version is intentionally conservative:
+What the tool does:
 
 - It identifies known signatures and container headers.
 - It reports encryption algorithms when the container metadata actually exposes them.
 - It runs raw-cipher heuristics, entropy analysis, and chi-square analysis when useful.
 - It scans adjacent sidecar metadata files for encryption-related fields.
 - It does not attempt to decrypt data or recover keys.
-- It avoids overclaiming for formats like VeraCrypt or raw dm-crypt volumes,
-  where the container can be intentionally indistinguishable from random data.
+- It stays cautious for formats like VeraCrypt or raw dm-crypt volumes, where
+  the container can be intentionally indistinguishable from random data.
 
 ## Supported detections
 
