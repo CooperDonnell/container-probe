@@ -46,6 +46,17 @@ What the tool does:
 
 ## Usage
 
+## Quick Start
+
+```bash
+git clone https://github.com/CooperDonnell/container-probe.git
+cd container-probe
+python3 -m pip install -e .
+container-probe /path/to/container.bin
+```
+
+Or run it directly from the repo without installing:
+
 ```bash
 python3 -m container_probe /path/to/container.bin
 python3 -m container_probe /path/to/container.bin --json
