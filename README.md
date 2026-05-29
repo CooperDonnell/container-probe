@@ -1,0 +1,176 @@
+# container-probe
+
+`container-probe` is a small forensic CLI that inspects a file and reports the
+most likely encryption container or protocol it matches.
+
+This first version is intentionally conservative:
+
+- It identifies known signatures and container headers.
+- It reports encryption algorithms when the container metadata actually exposes them.
+- It runs raw-cipher heuristics, entropy analysis, and chi-square analysis when useful.
+- It scans adjacent sidecar metadata files for encryption-related fields.
+- It does not attempt to decrypt data or recover keys.
+- It avoids overclaiming for formats like VeraCrypt or raw dm-crypt volumes,
+  where the container can be intentionally indistinguishable from random data.
+
+## Supported detections
+
+- Ansible Vault files
+- BitLocker volume signatures
+- Bouncy Castle BKS / UBER keystore candidates
+- Deeper OpenPGP packet metadata, including S2K hints when exposed
+- CMS / PKCS#7 encrypted content with ASN.1 OID parsing
+- Encrypted Microsoft Office compound-file documents
+- Encrypted PDF documents
+- Apple DMG disk images
+- Java JKS / JCEKS keystores
+- KeePass 1.x KDB databases
+- KeePass KDBX databases
+- OpenSSH private keys
+- OpenSSL salted format (`openssl enc`)
+- PKCS#8 encrypted private keys
+- PKCS#12 / PFX containers
+- Traditional PEM encrypted private keys
+- RAR signatures
+- RAR5 archive-encryption headers when present
+- SQLCipher-like encrypted SQLite candidates
+- SafeHouse virtual disk volumes (`.sdsk`)
+- `age` binary and armored files
+- ASCII-armored OpenPGP messages
+- Probable binary OpenPGP packet streams
+- ZIP files with encryption flags, including WinZip AES markers
+- 7z archives
+- LUKS1 headers with cipher / mode / hash extraction
+- LUKS2 headers with JSON metadata extraction
+- Unknown high-entropy blobs
+
+## Usage
+
+```bash
+python3 -m container_probe /path/to/container.bin
+python3 -m container_probe /path/to/container.bin --json
+python3 -m container_probe /path/to/container.bin --color always
+```
+
+Or install locally:
+
+```bash
+python3 -m pip install -e .
+container-probe /path/to/container.bin
+```
+
+## How It Works
+
+At a high level, the tool reads the file, checks for structured format markers,
+parses any visible metadata, and then falls back to heuristics when there is no
+clear header.
+
+1. It checks for well-known signatures or text headers.
+   For example, `7z`, ZIP, RAR, OpenSSL salted blobs, BitLocker, LUKS, OpenSSH
+   keys, PDFs, Office encrypted containers, KeePass databases, Java keystores,
+   DMGs, Ansible Vault files, `age`, and SafeHouse all have recognizable
+   markers near the start of the file.
+2. If the format has structured metadata, it parses that metadata.
+   For example, ZIP AES files expose AES strength in an extra field, some 7z
+   archives expose coder IDs such as `7zAES`, LUKS stores cipher and mode in
+   plaintext, CMS can expose encryption OIDs in ASN.1, OpenSSH keys expose
+   cipher and KDF names, KeePass headers expose cipher/KDF metadata, Ansible
+   Vault exposes its cipher in the text header, PDFs can expose crypt-filter
+   methods like `AESV2` or `AESV3`, and RAR5 can expose AES-256/PBKDF2 details
+   when an archive-encryption header is present.
+3. If the file is recognized but the algorithm is not stored in visible header
+   data, the tool says so instead of guessing.
+   That is why some formats can be identified confidently even when the exact
+   cipher cannot.
+4. If no known format matches, it falls back to heuristics such as entropy,
+   chi-square, printable-byte ratio, file-length alignment, and PKCS#7 padding
+   checks.
+   That helps distinguish random-looking encrypted or compressed blobs from
+   ordinary structured files and can hint at block-cipher layouts.
+5. It scans nearby sidecar files such as `.json`, `.xml`, `.yml`, `.yaml`, and
+   `.inf` for keys like `cipher`, `algorithm`, `mode`, `iv`, `salt`, or `kdf`.
+   Sometimes those files reveal the algorithm even when the payload itself does
+   not.
+
+In short: the tool tries to identify the container first, then extract the
+encryption method only when the container actually exposes it.
+
+When enough structured metadata is available, the CLI also prints a compact
+`Encryption Details` block with normalized fields such as algorithm, KDF,
+compression method, header-encryption status, and cautious password-recovery
+tooling hints.
+
+When the result is ambiguous or investigative follow-up would help, the CLI
+also prints a short `Analysis Guidance` section with format-aware next steps.
+
+## Example output
+
+```text
+Container Probe
+File: /tmp/sample.7z
+Size: 178 bytes
+Analyzed: 178 bytes
+Entropy: 5.40 bits/byte
+Chi-square: 253.93
+Printable ratio: 0.281
+Verdict: Known algorithm identified from visible metadata.
+
+Encryption Details:
+  Algorithm: AES-256
+  KDF: SHA-256 based key derivation
+  Compression: LZMA2
+  Header Encrypted: No
+  Password Recovery: Supported by Hashcat and John the Ripper
+
+Algorithm Summary:
+- 7z archive: AES-256 (KDF: SHA-256 based key derivation)
+
+Format Matches:
+- 7z archive [HIGH]
+  Header matches the 7z signature and exposed coder metadata includes an encryption method.
+  methods: 7zAES, LZMA2
+  encryption_algorithm: AES-256
+  kdf: SHA-256 based key derivation
+  compression_methods: LZMA2
+
+Heuristics:
+- Statistical profile [LOW]
+  The statistical profile is mixed: useful as a sanity check, but not enough to prove a specific algorithm.
+  entropy_bits_per_byte: 5.404
+  chi_square_uniformity: 253.93
+  printable_ratio: 0.281
+```
+
+## Design notes
+
+The detector combines:
+
+1. Signature checks for file formats with reliable magic bytes or text preambles.
+2. Structural parsing for container formats such as ZIP, 7z, CMS, LUKS, OpenSSH,
+   PEM/PKCS#8 keys, KeePass KDBX, Java keystores, PDFs, and Office encryption containers.
+3. Statistical analysis such as Shannon entropy, chi-square, and printable-byte ratio.
+4. Raw block-cipher heuristics such as file-length alignment and PKCS#7 padding checks.
+5. Sidecar metadata scanning for adjacent configuration or manifest files.
+
+This means the tool can tell you:
+
+- "this looks like a BitLocker or LUKS volume"
+- "this is an Ansible Vault file using `AES256`"
+- "this looks like a Bouncy Castle BKS keystore"
+- "this is a ZIP archive using WinZip AES-256"
+- "this CMS object uses AES-256-GCM"
+- "this OpenSSH private key uses `aes256-ctr` with `bcrypt`"
+- "this KeePass KDBX file uses AES-256-CBC with Argon2id"
+- "this may be a SQLCipher-style encrypted SQLite database"
+- "this PDF uses an AES-based security handler"
+- "this file is opaque and statistically consistent with ciphertext or compression"
+
+But it should not claim:
+
+- that standard VeraCrypt / TrueCrypt volumes can be recognized reliably from bytes alone
+- that SQLCipher or BKS/UBER candidates are proven beyond doubt without stronger format-specific evidence
+- the exact cipher suite for a raw encrypted volume with no plaintext header
+- the exact cipher when a container format does not store it in visible metadata
+- that every proprietary or uncommon encrypted format is fully implemented
+- whether a container is decryptable
+- who created the file or with which password
