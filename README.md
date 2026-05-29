@@ -44,6 +44,14 @@ What the tool does:
 - LUKS2 headers with JSON metadata extraction
 - Unknown high-entropy blobs
 
+## Use Cases
+
+- Safely triaging unknown encrypted files before recovery, repair, or migration attempts
+- Identifying container formats and visible encryption metadata during forensic analysis
+- Distinguishing structured encrypted containers from generic high-entropy blobs
+- Checking adjacent sidecar files for cipher, mode, IV, salt, or KDF details
+- Reducing manual file-format investigation during incident response or data-recovery workflows
+
 ## Usage
 
 ## Quick Start
