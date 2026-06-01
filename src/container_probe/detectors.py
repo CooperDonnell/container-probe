@@ -266,6 +266,7 @@ def inspect_bytes(
         result = detector(data)
         if result is not None:
             detections.append(result)
+    detections = suppress_overlapping_detections(detections)
 
     if not detections:
         heuristic_match = detect_unknown_high_entropy(data, entropy, chi_square, ratio)
@@ -302,6 +303,17 @@ def inspect_bytes(
         heuristics=sort_findings(heuristics),
         notes=notes,
     )
+
+
+def suppress_overlapping_detections(detections: list[Detection]) -> list[Detection]:
+    labels = {detection.label for detection in detections}
+    if "PKCS#12 / PFX container" in labels:
+        return [
+            detection
+            for detection in detections
+            if detection.label != "CMS/PKCS#7 encrypted content"
+        ]
+    return detections
 
 
 def shannon_entropy(data: bytes) -> float:

@@ -278,6 +278,7 @@ class DetectorTests(unittest.TestCase):
         )
         report = inspect_bytes(pfx_der)
         self.assertEqual(report.detections[0].label, "PKCS#12 / PFX container")
+        self.assertNotIn("CMS/PKCS#7 encrypted content", [item.label for item in report.detections])
         self.assertIn("TripleDES", report.detections[0].details["encryption_algorithm"])
 
     def test_detects_luks1_and_extracts_fields(self) -> None:
