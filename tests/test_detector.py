@@ -195,17 +195,30 @@ class DetectorTests(unittest.TestCase):
         payload[0:56] = b"WARNING: This file is a SafeHouse virtual disk volume.\r\n"
         payload[56:77] = b"header version: 2.00"
         payload[0x60:0x69] = b"SafeDisk\x00"
-        payload[0x70:0x75] = b"3.00\x00"
+        payload[0x74:0x79] = b"3.00\x00"
         payload[0x84:0x95] = b"My Private Files\x00"
         payload[0xCE:0xD8] = b"SafeHouse\x00"
+        struct.pack_into("<H", payload, 0x128, 4138)
+        payload[0x130:0x1B0] = bytes(range(128))
+        payload[0x1B0:0x1C0] = bytes.fromhex("80000e00b00101f32000140000000000")
+        payload[0x1C0:0x1D0] = bytes.fromhex("8c878a0c287dbe9b6ce3d1a57cc03f61")
         payload[0x248:0x268] = b"C835E18F3A779443D67527873ADAF9AB"
         report = inspect_bytes(bytes(payload))
         self.assertEqual(report.detections[0].label, "SafeHouse virtual disk")
         self.assertEqual(report.detections[0].details["product_name"], "SafeDisk")
         self.assertEqual(report.detections[0].details["app_version"], "3.00")
+        self.assertEqual(report.detections[0].details["version_text"], "SafeDisk 3.00 / SafeHouse header 2.00")
         self.assertEqual(report.detections[0].details["volume_name"], "My Private Files")
         self.assertEqual(report.detections[0].details["vendor_name"], "SafeHouse")
         self.assertEqual(report.detections[0].details["header_identifier"], "C835E18F3A779443D67527873ADAF9AB")
+        self.assertEqual(report.detections[0].details["kdf_iterations"], "4138")
+        self.assertEqual(report.detections[0].details["kdf_salt_length"], "128")
+        self.assertEqual(report.detections[0].details["kdf_salt_offset"], "0x130")
+        self.assertEqual(report.detections[0].details["kdf_salt_end"], "0x1af")
+        self.assertEqual(report.detections[0].details["cipher_chunk_offset"], "0x1b0")
+        self.assertEqual(report.detections[0].details["cipher_chunk"], "80000e00b00101f32000140000000000")
+        self.assertEqual(report.detections[0].details["encrypted_password_verifier_offset"], "0x1c0")
+        self.assertEqual(report.detections[0].details["encrypted_password_verifier"], "8c878a0c287dbe9b6ce3d1a57cc03f61")
 
     def test_detects_bitlocker_signature(self) -> None:
         payload = bytearray(512)
@@ -467,9 +480,17 @@ class DetectorTests(unittest.TestCase):
         payload[0x70:0x75] = b"3.00\x00"
         payload[0x84:0x95] = b"My Private Files\x00"
         payload[0xCE:0xD8] = b"SafeHouse\x00"
+        struct.pack_into("<H", payload, 0x128, 4138)
+        payload[0x130:0x1B0] = bytes(range(128))
+        payload[0x1B0:0x1C0] = bytes.fromhex("80000e00b00101f32000140000000000")
+        payload[0x1C0:0x1D0] = bytes.fromhex("8c878a0c287dbe9b6ce3d1a57cc03f61")
         payload[0x248:0x268] = b"77C835E18F3A779443D67527873ADAF9"
         report = inspect_bytes(bytes(payload))
         text = render_text(report.to_dict())
+        self.assertIn("KDF Iterations: 4138", text)
+        self.assertIn("KDF Salt: 128 bytes (0x130-0x1af)", text)
+        self.assertIn("Cipher Chunk: 80000e00b00101f32000140000000000 at 0x1b0", text)
+        self.assertIn("Encrypted Password Verifier: 8c878a0c287dbe9b6ce3d1a57cc03f61 at 0x1c0", text)
         self.assertIn("Analysis Guidance", text)
         self.assertIn("Container format identified as SafeHouse virtual disk.", text)
         self.assertIn("Encryption algorithm is not exposed in the parsed header metadata.", text)

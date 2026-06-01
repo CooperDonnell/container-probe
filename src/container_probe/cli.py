@@ -212,9 +212,30 @@ def normalize_encryption_details(label_name: str, details: dict[str, str]) -> li
     elif kdf_hash:
         rows.append(("KDF", kdf_hash))
 
+    if "kdf_iterations" in details:
+        rows.append(("KDF Iterations", details["kdf_iterations"]))
+
+    if "kdf_salt_length" in details:
+        salt_summary = f"{details['kdf_salt_length']} bytes"
+        if "kdf_salt_offset" in details and "kdf_salt_end" in details:
+            salt_summary += f" ({details['kdf_salt_offset']}-{details['kdf_salt_end']})"
+        rows.append(("KDF Salt", salt_summary))
+
     compression = details.get("compression_methods") or details.get("compression_method")
     if compression:
         rows.append(("Compression", compression))
+
+    if "cipher_chunk" in details:
+        cipher_summary = details["cipher_chunk"]
+        if "cipher_chunk_offset" in details:
+            cipher_summary += f" at {details['cipher_chunk_offset']}"
+        rows.append(("Cipher Chunk", cipher_summary))
+
+    if "encrypted_password_verifier" in details:
+        verifier_summary = details["encrypted_password_verifier"]
+        if "encrypted_password_verifier_offset" in details:
+            verifier_summary += f" at {details['encrypted_password_verifier_offset']}"
+        rows.append(("Encrypted Password Verifier", verifier_summary))
 
     header_encrypted = details.get("header_encrypted")
     if header_encrypted == "yes":

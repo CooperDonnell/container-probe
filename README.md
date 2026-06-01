@@ -34,7 +34,8 @@ What the tool does:
 - RAR signatures
 - RAR5 archive-encryption headers when present
 - SQLCipher-like encrypted SQLite candidates
-- SafeHouse virtual disk volumes (`.sdsk`)
+- SafeHouse virtual disk volumes (`.sdsk`), including visible SafeDisk metadata,
+  KDF salt / iteration fields, and encrypted verifier bytes when present
 - `age` binary and armored files
 - ASCII-armored OpenPGP messages
 - Probable binary OpenPGP packet streams

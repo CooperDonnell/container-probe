@@ -600,6 +600,8 @@ def detect_safehouse_virtual_disk(data: bytes) -> Detection | None:
 
     product_name = read_c_string(data, 0x60, 32) if len(data) > 0x60 else ""
     app_version = read_c_string(data, 0x70, 16) if len(data) > 0x70 else ""
+    if not app_version:
+        app_version = read_c_string(data, 0x74, 12) if len(data) > 0x74 else ""
     volume_name = read_c_string(data, 0x84, 64) if len(data) > 0x84 else ""
     vendor_name = read_c_string(data, 0xCE, 32) if len(data) > 0xCE else ""
     header_identifier = None
@@ -608,18 +610,25 @@ def detect_safehouse_virtual_disk(data: bytes) -> Detection | None:
         header_identifier = identifier_match.group(0).decode("ascii")
 
     details: dict[str, str] = {}
+    version_parts: list[str] = []
     if header_version:
         details["header_version"] = header_version
+        version_parts.append(f"SafeHouse header {header_version}")
     if product_name:
         details["product_name"] = product_name
     if app_version:
         details["app_version"] = app_version
+    if product_name and app_version:
+        version_parts.insert(0, f"{product_name} {app_version}")
+    if version_parts:
+        details["version_text"] = " / ".join(version_parts)
     if volume_name:
         details["volume_name"] = volume_name
     if vendor_name:
         details["vendor_name"] = vendor_name
     if header_identifier:
         details["header_identifier"] = header_identifier
+    add_safehouse_crypto_header_details(data, details)
     details["encryption_algorithm"] = "not exposed by parsed SafeHouse header"
 
     return Detection(
@@ -628,6 +637,36 @@ def detect_safehouse_virtual_disk(data: bytes) -> Detection | None:
         rationale="Header contains the SafeHouse virtual disk warning text and product markers.",
         details=details,
     )
+
+
+def add_safehouse_crypto_header_details(data: bytes, details: dict[str, str]) -> None:
+    if len(data) >= 0x12A:
+        details["kdf_iterations"] = str(struct.unpack_from("<H", data, 0x128)[0])
+        details["kdf_iterations_offset"] = "0x128"
+
+    salt_offset = 0x130
+    salt_length = 128
+    salt_end = salt_offset + salt_length - 1
+    if len(data) > salt_end:
+        salt = data[salt_offset : salt_offset + salt_length]
+        details["kdf_salt"] = salt.hex()
+        details["kdf_salt_length"] = str(salt_length)
+        details["kdf_salt_offset"] = f"0x{salt_offset:x}"
+        details["kdf_salt_end"] = f"0x{salt_end:x}"
+
+    cipher_chunk_offset = 0x1B0
+    cipher_chunk_length = 16
+    if len(data) >= cipher_chunk_offset + cipher_chunk_length:
+        chunk = data[cipher_chunk_offset : cipher_chunk_offset + cipher_chunk_length]
+        details["cipher_chunk_offset"] = f"0x{cipher_chunk_offset:x}"
+        details["cipher_chunk"] = chunk.hex()
+
+    verifier_offset = 0x1C0
+    verifier_length = 16
+    if len(data) >= verifier_offset + verifier_length:
+        verifier = data[verifier_offset : verifier_offset + verifier_length]
+        details["encrypted_password_verifier_offset"] = f"0x{verifier_offset:x}"
+        details["encrypted_password_verifier"] = verifier.hex()
 
 
 def detect_bitlocker(data: bytes) -> Detection | None:
