@@ -53,9 +53,12 @@ What the tool does:
 - Checking adjacent sidecar files for cipher, mode, IV, salt, or KDF details
 - Reducing manual file-format investigation during incident response or data-recovery workflows
 
-## Usage
-
 ## Quick Start
+
+Clone the repo, install the CLI locally, then run `container-probe` against a
+file you want to inspect.
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/CooperDonnell/container-probe.git
@@ -64,7 +67,7 @@ python3 -m pip install -e .
 container-probe /path/to/container.bin
 ```
 
-Or run it directly from the repo without installing:
+Run without installing:
 
 ```bash
 PYTHONPATH=src python3 -m container_probe /path/to/container.bin
@@ -72,11 +75,43 @@ PYTHONPATH=src python3 -m container_probe /path/to/container.bin --json
 PYTHONPATH=src python3 -m container_probe /path/to/container.bin --color always
 ```
 
-Or install locally:
+### Windows PowerShell
+
+```powershell
+git clone https://github.com/CooperDonnell/container-probe.git
+cd container-probe
+py -m pip install -e .
+container-probe C:\path\to\container.bin
+```
+
+Run without installing:
+
+```powershell
+$env:PYTHONPATH = "src"
+py -m container_probe C:\path\to\container.bin
+py -m container_probe C:\path\to\container.bin --json
+py -m container_probe C:\path\to\container.bin --color always
+```
+
+### If `container-probe` Is Not Found
+
+The package may have installed successfully, but Python's script directory may
+not be on your `PATH`. You can always run the module form instead:
 
 ```bash
-python3 -m pip install -e .
-container-probe /path/to/container.bin
+python3 -m container_probe /path/to/container.bin
+```
+
+On Windows:
+
+```powershell
+py -m container_probe C:\path\to\container.bin
+```
+
+To confirm the package is installed:
+
+```bash
+python3 -m pip show container-probe
 ```
 
 ## How It Works
