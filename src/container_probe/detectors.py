@@ -324,11 +324,19 @@ def inspect_bytes(
 def suppress_overlapping_detections(detections: list[Detection]) -> list[Detection]:
     labels = {detection.label for detection in detections}
     if "PKCS#12 / PFX container" in labels:
-        return [
+        detections = [
             detection
             for detection in detections
             if detection.label != "CMS/PKCS#7 encrypted content"
         ]
+
+    if any(detection.confidence == "high" for detection in detections):
+        detections = [
+            detection
+            for detection in detections
+            if detection.label != "Probable binary OpenPGP packet stream"
+        ]
+
     return detections
 
 
@@ -1770,7 +1778,10 @@ def parse_asn1_value(
         return None
 
     tag = data[offset]
-    length, length_offset = parse_asn1_length(data, offset + 1)
+    try:
+        length, length_offset = parse_asn1_length(data, offset + 1)
+    except ValueError:
+        return None
     value_start = length_offset
     value_end = value_start + length
     if value_end > len(data):

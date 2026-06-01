@@ -162,6 +162,11 @@ class DetectorTests(unittest.TestCase):
         report = inspect_bytes(payload)
         self.assertEqual(report.detections[0].label, "Java JKS keystore")
 
+    def test_non_der_jks_does_not_crash_pkcs12_probe(self) -> None:
+        payload = b"\x30\x84\xff\xff\xff\xff" + struct.pack(">III", 0xFEEDFEED, 2, 1) + b"\x00" * 32
+        report = inspect_bytes(payload)
+        self.assertNotIn("PKCS#12 / PFX container", [item.label for item in report.detections])
+
     def test_detects_java_jceks_keystore(self) -> None:
         payload = struct.pack(">III", 0xCECECECE, 1, 2) + b"\x00" * 32
         report = inspect_bytes(payload)
