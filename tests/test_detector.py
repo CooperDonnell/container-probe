@@ -237,6 +237,17 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(report.detections[0].label, "age file format")
         self.assertEqual(report.detections[0].details["payload_encryption"], "ChaCha20-Poly1305")
 
+    def test_detects_armored_age_stanza_type(self) -> None:
+        payload = (
+            b"-----BEGIN AGE ENCRYPTED FILE-----\n"
+            b"YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNjcnlwdCBhYmMKLS0tCmJvZHkK\n"
+            b"-----END AGE ENCRYPTED FILE-----\n"
+        )
+        report = inspect_bytes(payload)
+        self.assertEqual(report.detections[0].label, "age armored file")
+        self.assertEqual(report.detections[0].details["payload_encryption"], "ChaCha20-Poly1305")
+        self.assertEqual(report.detections[0].details["recipient_stanzas"], "scrypt")
+
     def test_detects_ascii_armored_pgp(self) -> None:
         report = inspect_bytes(b"-----BEGIN PGP MESSAGE-----\nVersion: test\n\nSGVsbG8=\n")
         self.assertEqual(report.detections[0].label, "ASCII-armored OpenPGP message")

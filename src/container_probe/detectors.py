@@ -1520,11 +1520,16 @@ def detect_age(data: bytes) -> Detection | None:
         )
 
     if data.startswith(b"-----BEGIN AGE ENCRYPTED FILE-----"):
+        decoded = decode_ascii_armor(data)
+        stanza_types = parse_age_stanza_types(decoded) if decoded is not None else []
+        details = {"payload_encryption": "ChaCha20-Poly1305"}
+        if stanza_types:
+            details["recipient_stanzas"] = ", ".join(stanza_types)
         return Detection(
             label="age armored file",
             confidence="high",
             rationale="Header matches the armored age preamble.",
-            details={"payload_encryption": "ChaCha20-Poly1305"},
+            details=details,
         )
 
     return None
