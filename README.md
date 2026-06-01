@@ -67,9 +67,9 @@ container-probe /path/to/container.bin
 Or run it directly from the repo without installing:
 
 ```bash
-python3 -m container_probe /path/to/container.bin
-python3 -m container_probe /path/to/container.bin --json
-python3 -m container_probe /path/to/container.bin --color always
+PYTHONPATH=src python3 -m container_probe /path/to/container.bin
+PYTHONPATH=src python3 -m container_probe /path/to/container.bin --json
+PYTHONPATH=src python3 -m container_probe /path/to/container.bin --color always
 ```
 
 Or install locally:
