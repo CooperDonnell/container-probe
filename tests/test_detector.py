@@ -281,6 +281,51 @@ class DetectorTests(unittest.TestCase):
         self.assertNotIn("CMS/PKCS#7 encrypted content", [item.label for item in report.detections])
         self.assertIn("TripleDES", report.detections[0].details["encryption_algorithm"])
 
+    def test_detects_pkcs12_pbes2_metadata_inside_authsafe(self) -> None:
+        authsafe = der(
+            0x30,
+            der(
+                0x30,
+                oid("1.2.840.113549.1.5.13"),
+                der(
+                    0x30,
+                    der(
+                        0x30,
+                        oid("1.2.840.113549.1.5.12"),
+                        der(
+                            0x30,
+                            der(0x04, b"1234567890abcdef"),
+                            der(0x02, b"\x08\x00"),
+                            der(0x30, oid("1.2.840.113549.2.9")),
+                        ),
+                    ),
+                    der(
+                        0x30,
+                        oid("2.16.840.1.101.3.4.1.42"),
+                        der(0x04, b"iviviviviviviviv"),
+                    ),
+                ),
+            ),
+        )
+        pfx_der = der(
+            0x30,
+            der(0x02, b"\x03"),
+            der(
+                0x30,
+                oid("1.2.840.113549.1.7.1"),
+                der(0xA0, der(0x04, authsafe)),
+            ),
+        )
+        report = inspect_bytes(pfx_der)
+        details = report.detections[0].details
+        self.assertEqual(report.detections[0].label, "PKCS#12 / PFX container")
+        self.assertEqual(details["encryption_scheme"], "PBES2")
+        self.assertEqual(details["encryption_algorithm"], "AES-256-CBC")
+        self.assertEqual(details["kdf"], "PBKDF2")
+        self.assertEqual(details["prf"], "HMAC-SHA256")
+        self.assertEqual(details["kdf_iterations"], "2048")
+        self.assertEqual(details["kdf_salt_length"], "16")
+
     def test_detects_luks1_and_extracts_fields(self) -> None:
         payload = bytearray(592)
         payload[0:6] = b"LUKS\xba\xbe"

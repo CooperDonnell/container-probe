@@ -77,6 +77,22 @@ PKCS5_KDFS = {
     "1.2.840.113549.1.5.12": "PBKDF2",
     "1.3.6.1.4.1.11591.4.11": "scrypt",
 }
+PKCS5_ENCRYPTION_SCHEMES = {
+    "1.2.840.113549.1.5.13": "PBES2",
+}
+HMAC_OIDS = {
+    "1.2.840.113549.2.7": "HMAC-SHA1",
+    "1.2.840.113549.2.8": "HMAC-SHA224",
+    "1.2.840.113549.2.9": "HMAC-SHA256",
+    "1.2.840.113549.2.10": "HMAC-SHA384",
+    "1.2.840.113549.2.11": "HMAC-SHA512",
+}
+HASH_OIDS = {
+    "1.3.14.3.2.26": "SHA-1",
+    "2.16.840.1.101.3.4.2.1": "SHA-256",
+    "2.16.840.1.101.3.4.2.2": "SHA-384",
+    "2.16.840.1.101.3.4.2.3": "SHA-512",
+}
 PKCS8_ENCRYPTION_SCHEMES = {
     **CMS_ENCRYPTION_OIDS,
     "1.2.840.113549.3.4": "RC4",
@@ -1175,18 +1191,42 @@ def detect_pkcs12(data: bytes) -> Detection | None:
         return None
 
     oids = extract_asn1_oids(der)
-    pbe_algorithms = [PKCS12_PBE_OIDS[oid] for oid in oids if oid in PKCS12_PBE_OIDS]
-    if not pbe_algorithms and not looks_like_pkcs12(der, oids):
+    deep_oids = extract_asn1_oids_with_embedded_der(der)
+    all_oids = unique_preserve_order(oids + deep_oids)
+    pbe_algorithms = [PKCS12_PBE_OIDS[oid] for oid in all_oids if oid in PKCS12_PBE_OIDS]
+    encryption_schemes = [PKCS5_ENCRYPTION_SCHEMES[oid] for oid in all_oids if oid in PKCS5_ENCRYPTION_SCHEMES]
+    content_algorithms = [PKCS8_ENCRYPTION_SCHEMES[oid] for oid in all_oids if oid in PKCS8_ENCRYPTION_SCHEMES]
+    kdfs = [PKCS5_KDFS[oid] for oid in all_oids if oid in PKCS5_KDFS]
+    prfs = [HMAC_OIDS[oid] for oid in all_oids if oid in HMAC_OIDS]
+    hashes = [HASH_OIDS[oid] for oid in all_oids if oid in HASH_OIDS]
+    pbkdf2_params = extract_pbkdf2_params_from_der(der)
+    if not looks_like_pkcs12(der, all_oids):
         return None
 
     details = {"encoding": source}
-    if pbe_algorithms:
-        details["encryption_algorithm"] = ", ".join(unique_preserve_order(pbe_algorithms))
+    algorithms = unique_preserve_order(pbe_algorithms + content_algorithms)
+    if algorithms:
+        details["encryption_algorithm"] = ", ".join(algorithms)
+    if encryption_schemes:
+        details["encryption_scheme"] = ", ".join(unique_preserve_order(encryption_schemes))
+    if kdfs:
+        details["kdf"] = ", ".join(unique_preserve_order(kdfs))
+    if prfs:
+        details["prf"] = ", ".join(unique_preserve_order(prfs))
+    elif hashes:
+        details["hash_algorithm"] = ", ".join(unique_preserve_order(hashes))
+    if pbkdf2_params:
+        iterations = unique_preserve_order([str(item["iterations"]) for item in pbkdf2_params if item.get("iterations") is not None])
+        salt_lengths = unique_preserve_order([str(item["salt_length"]) for item in pbkdf2_params if item.get("salt_length") is not None])
+        if iterations:
+            details["kdf_iterations"] = ", ".join(iterations)
+        if salt_lengths:
+            details["kdf_salt_length"] = ", ".join(salt_lengths)
 
     return Detection(
         label="PKCS#12 / PFX container",
-        confidence="high" if pbe_algorithms else "medium",
-        rationale="ASN.1 structure looks like a PKCS#12/PFX container and may expose PKCS#12 PBE algorithm OIDs.",
+        confidence="high" if algorithms or encryption_schemes or kdfs else "medium",
+        rationale="ASN.1 structure looks like a PKCS#12/PFX container and may expose PKCS#12/PBES2 encryption metadata.",
         details=details,
     )
 
@@ -1203,6 +1243,140 @@ def looks_like_pkcs12(data: bytes, oids: list[str]) -> bool:
         return False
     version = int.from_bytes(data[child[2] : child[3]], "big")
     return version == 3
+
+
+def extract_asn1_oids_with_embedded_der(data: bytes) -> list[str]:
+    oids: list[str] = []
+    for blob in collect_embedded_der_blobs(data):
+        oids.extend(extract_asn1_oids(blob))
+    return unique_preserve_order(oids)
+
+
+def collect_embedded_der_blobs(data: bytes) -> list[bytes]:
+    blobs: list[bytes] = [data]
+    seen: set[bytes] = {data}
+
+    def add_blob(blob: bytes) -> None:
+        if blob in seen:
+            return
+        seen.add(blob)
+        blobs.append(blob)
+        walk(blob, 0, len(blob), 0)
+
+    def walk(blob: bytes, offset: int, end: int, depth: int) -> None:
+        if depth > 24:
+            return
+        while offset < end:
+            parsed = parse_asn1_value(blob, offset)
+            if parsed is None:
+                return
+            tag, _length, value_start, value_end, next_offset = parsed
+            if tag & 0x20:
+                walk(blob, value_start, value_end, depth + 1)
+            elif tag == 0x04:
+                value = blob[value_start:value_end]
+                if looks_like_embedded_der(value):
+                    add_blob(value)
+            offset = next_offset
+
+    walk(data, 0, len(data), 0)
+    return blobs
+
+
+def looks_like_embedded_der(data: bytes) -> bool:
+    if len(data) < 2 or data[0] not in {0x30, 0x31}:
+        return False
+    parsed = parse_asn1_value(data, 0)
+    return parsed is not None and parsed[4] == len(data)
+
+
+def extract_pbkdf2_params_from_der(data: bytes) -> list[dict[str, int | None]]:
+    params: list[dict[str, int | None]] = []
+    for blob in collect_embedded_der_blobs(data):
+        params.extend(extract_pbkdf2_params_from_blob(blob))
+    return dedupe_pbkdf2_params(params)
+
+
+def extract_pbkdf2_params_from_blob(data: bytes) -> list[dict[str, int | None]]:
+    params: list[dict[str, int | None]] = []
+
+    def walk(offset: int, end: int, depth: int) -> None:
+        if depth > 32:
+            return
+        while offset < end:
+            parsed = parse_asn1_value(data, offset)
+            if parsed is None:
+                return
+            tag, _length, value_start, value_end, next_offset = parsed
+            if tag == 0x30:
+                children = parse_asn1_children(data, value_start, value_end)
+                if children:
+                    first = children[0]
+                    if first[0] == 0x06:
+                        oid_value = decode_oid(data[first[2] : first[3]])
+                        if oid_value == "1.2.840.113549.1.5.12" and len(children) >= 2:
+                            parsed_params = parse_pbkdf2_params(data, children[1])
+                            if parsed_params:
+                                params.append(parsed_params)
+                    walk(value_start, value_end, depth + 1)
+            elif tag & 0x20:
+                walk(value_start, value_end, depth + 1)
+            offset = next_offset
+
+    walk(0, len(data), 0)
+    return params
+
+
+def parse_asn1_children(
+    data: bytes,
+    offset: int,
+    end: int,
+) -> list[tuple[int, int, int, int, int]]:
+    children: list[tuple[int, int, int, int, int]] = []
+    while offset < end:
+        parsed = parse_asn1_value(data, offset)
+        if parsed is None or parsed[4] > end:
+            return []
+        children.append(parsed)
+        offset = parsed[4]
+    return children
+
+
+def parse_pbkdf2_params(
+    data: bytes,
+    params_node: tuple[int, int, int, int, int],
+) -> dict[str, int | None] | None:
+    if params_node[0] != 0x30:
+        return None
+    children = parse_asn1_children(data, params_node[2], params_node[3])
+    if len(children) < 2:
+        return None
+
+    salt_length = None
+    salt_node = children[0]
+    if salt_node[0] == 0x04:
+        salt_length = salt_node[1]
+
+    iterations = None
+    iteration_node = children[1]
+    if iteration_node[0] == 0x02:
+        iterations = int.from_bytes(data[iteration_node[2] : iteration_node[3]], "big")
+
+    if salt_length is None and iterations is None:
+        return None
+    return {"salt_length": salt_length, "iterations": iterations}
+
+
+def dedupe_pbkdf2_params(params: list[dict[str, int | None]]) -> list[dict[str, int | None]]:
+    seen: set[tuple[int | None, int | None]] = set()
+    deduped: list[dict[str, int | None]] = []
+    for item in params:
+        key = (item.get("salt_length"), item.get("iterations"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 def detect_pdf_encryption(data: bytes) -> Detection | None:
