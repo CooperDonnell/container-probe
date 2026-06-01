@@ -380,6 +380,17 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(report.detections[0].label, "Encrypted PDF document")
         self.assertEqual(report.detections[0].details["encryption_algorithm"], "AES-128-CBC")
 
+    def test_normalizes_pdf_aesv3_key_length(self) -> None:
+        payload = (
+            b"%PDF-1.7\n"
+            b"1 0 obj\n<< /Filter /Standard /V 5 /R 6 /Length 32 /CF << /StdCF << /CFM /AESV3 >> >> >>\nendobj\n"
+            b"trailer\n<< /Encrypt 1 0 R >>\n%%EOF"
+        )
+        report = inspect_bytes(payload)
+        self.assertEqual(report.detections[0].label, "Encrypted PDF document")
+        self.assertEqual(report.detections[0].details["encryption_algorithm"], "AES-256")
+        self.assertEqual(report.detections[0].details["key_length_bits"], "256")
+
     def test_detects_encrypted_office_document(self) -> None:
         payload = (
             b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"

@@ -1396,23 +1396,29 @@ def detect_pdf_encryption(data: bytes) -> Detection | None:
         details["security_handler_version"] = version_match.group(1)
     if revision_match:
         details["security_handler_revision"] = revision_match.group(1)
-    if length_match:
-        details["key_length_bits"] = length_match.group(1)
-
     if cfm_match:
         cfm = cfm_match.group(1)
         details["crypt_filter_method"] = cfm
         algorithm = PDF_FILTER_ALGORITHMS.get(cfm)
         if algorithm:
             details["encryption_algorithm"] = algorithm
+        if cfm == "AESV3":
+            details["key_length_bits"] = "256"
+        elif length_match:
+            details["key_length_bits"] = length_match.group(1)
     elif version_match:
         version = int(version_match.group(1))
+        if length_match:
+            details["key_length_bits"] = length_match.group(1)
         if version in (1, 2):
             details["encryption_algorithm"] = "RC4"
         elif version == 4:
             details["encryption_algorithm"] = "PDF standard security handler with configurable crypt filters"
         elif version >= 5:
             details["encryption_algorithm"] = "AES-256 or newer PDF standard-security variant"
+            details["key_length_bits"] = "256"
+    elif length_match:
+        details["key_length_bits"] = length_match.group(1)
 
     return Detection(
         label="Encrypted PDF document",
