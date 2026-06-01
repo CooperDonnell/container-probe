@@ -53,6 +53,85 @@ What the tool does:
 - Checking adjacent sidecar files for cipher, mode, IV, salt, or KDF details
 - Reducing manual file-format investigation during incident response or data-recovery workflows
 
+## Prerequisites
+
+You need Python 3.11 or newer and Git.
+
+There are no required third-party Python dependencies beyond what is installed
+with this package.
+
+### macOS
+
+If you already have Python and Git installed, skip this section.
+
+Install Apple's command-line tools, which include Git:
+
+```bash
+xcode-select --install
+```
+
+Install Python from [python.org](https://www.python.org/downloads/) or with
+Homebrew:
+
+```bash
+brew install python
+```
+
+Check that both commands work:
+
+```bash
+python3 --version
+git --version
+```
+
+### Linux
+
+On Debian or Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip git
+```
+
+On Fedora:
+
+```bash
+sudo dnf install python3 python3-pip git
+```
+
+Check that both commands work:
+
+```bash
+python3 --version
+git --version
+```
+
+### Windows
+
+Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/).
+During installation, check the box that says `Add python.exe to PATH`.
+
+Install Git for Windows from [git-scm.com](https://git-scm.com/download/win).
+
+Open either PowerShell or Command Prompt and check:
+
+```powershell
+py --version
+git --version
+```
+
+Use the PowerShell commands if your terminal prompt starts with `PS`, like:
+
+```text
+PS C:\Users\you>
+```
+
+Use the Command Prompt commands if your terminal prompt looks like:
+
+```text
+C:\Users\you>
+```
+
 ## Quick Start
 
 Clone the repo, install the CLI locally, then run `container-probe` against a
@@ -77,6 +156,8 @@ PYTHONPATH=src python3 -m container_probe /path/to/container.bin --color always
 
 ### Windows PowerShell
 
+Use this section only if your prompt starts with `PS`.
+
 ```powershell
 git clone https://github.com/CooperDonnell/container-probe.git
 cd container-probe
@@ -93,25 +174,66 @@ py -m container_probe C:\path\to\container.bin --json
 py -m container_probe C:\path\to\container.bin --color always
 ```
 
+### Windows Command Prompt
+
+Use this section only if your prompt looks like `C:\Users\you>`.
+
+```bat
+git clone https://github.com/CooperDonnell/container-probe.git
+cd container-probe
+py -m pip install -e .
+container-probe C:\path\to\container.bin
+```
+
+Run without installing:
+
+```bat
+set PYTHONPATH=src
+py -m container_probe C:\path\to\container.bin
+py -m container_probe C:\path\to\container.bin --json
+```
+
 ### If `container-probe` Is Not Found
 
 The package may have installed successfully, but Python's script directory may
-not be on your `PATH`. You can always run the module form instead:
+not be on your `PATH`. Confirm the package is installed:
 
 ```bash
-python3 -m container_probe /path/to/container.bin
+python3 -m pip show container-probe
 ```
 
 On Windows:
 
 ```powershell
+py -m pip show container-probe
+```
+
+If `pip show` finds the package, but `container-probe` is not found, run the
+module form:
+
+```bash
+python3 -m container_probe /path/to/container.bin
+```
+
+```powershell
 py -m container_probe C:\path\to\container.bin
 ```
 
-To confirm the package is installed:
+If `py -m container_probe` says `No module named container_probe`, either install
+the package first with `py -m pip install -e .` from inside the repo, or use the
+direct-run command with `PYTHONPATH` set as shown above.
 
-```bash
-python3 -m pip show container-probe
+If `py` is not recognized on Windows, Python is probably not installed or was
+installed without being added to `PATH`. Reinstall Python from python.org and
+select `Add python.exe to PATH`.
+
+If `git` is not recognized, install Git for Windows from git-scm.com and open a
+new terminal window.
+
+Use an underscore for the module name:
+
+```powershell
+py -m container_probe C:\path\to\container.bin
 ```
 
 ## How It Works
