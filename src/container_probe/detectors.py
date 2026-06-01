@@ -25,7 +25,9 @@ KDB_SIGNATURE_2 = 0xB54BFB65
 KDBX_SIGNATURE_1 = 0x9AA2D903
 KDBX_SIGNATURE_2 = 0xB54BFB67
 LUKS1_MAGIC = b"LUKS\xba\xbe"
-LUKS2_MAGIC = b"SKUL\xba\xbe"
+LUKS2_PRIMARY_MAGIC = b"LUKS\xba\xbe"
+LUKS2_SECONDARY_MAGIC = b"SKUL\xba\xbe"
+LUKS2_MAGIC = LUKS2_SECONDARY_MAGIC
 KNOWN_SIDECAR_SUFFIXES = {".json", ".xml", ".yml", ".yaml", ".inf"}
 PGP_SYMMETRIC_ALGORITHMS = {
     0: "plaintext or unencrypted",
@@ -1887,18 +1889,45 @@ def detect_luks1(data: bytes) -> Detection | None:
 
 
 def detect_luks2(data: bytes) -> Detection | None:
-    if len(data) < 4096 or not data.startswith(LUKS2_MAGIC):
+    if len(data) < 4096 or not (
+        data.startswith(LUKS2_PRIMARY_MAGIC) or data.startswith(LUKS2_SECONDARY_MAGIC)
+    ):
         return None
 
     version = struct.unpack(">H", data[6:8])[0]
+    if version != 2:
+        return None
     metadata = parse_luks2_json_metadata(data)
-    details: dict[str, str] = {"version": str(version)}
+    details: dict[str, str] = {
+        "version": str(version),
+        "header_magic": "secondary" if data.startswith(LUKS2_SECONDARY_MAGIC) else "primary",
+    }
+    if len(data) >= 24:
+        details["header_size_bytes"] = str(struct.unpack_from(">Q", data, 8)[0])
+        details["sequence_id"] = str(struct.unpack_from(">Q", data, 16)[0])
+    if len(data) >= 80:
+        label = read_c_string(data, 24, 48)
+        if label:
+            details["label"] = label
+    if len(data) >= 128:
+        checksum_algorithm = read_c_string(data, 72, 32)
+        if checksum_algorithm:
+            details["checksum_algorithm"] = checksum_algorithm
+    if len(data) >= 208:
+        uuid = read_c_string(data, 168, 40)
+        if uuid:
+            details["uuid"] = uuid
+    if len(data) >= 208:
+        subsystem = read_c_string(data, 208, 48)
+        if subsystem:
+            details["subsystem"] = subsystem
 
     if metadata is not None:
         encryption = extract_first_json_value(metadata, "encryption")
         kdf_type = extract_first_json_value(metadata, "type", parent_key="kdf")
         kdf_hash = extract_first_json_value(metadata, "hash")
         sector_size = extract_first_json_value(metadata, "sector_size")
+        enrich_luks2_details_from_metadata(metadata, details)
         if encryption:
             details["encryption_algorithm"] = encryption
         if kdf_type:
@@ -1922,8 +1951,87 @@ def detect_luks2(data: bytes) -> Detection | None:
     )
 
 
+def enrich_luks2_details_from_metadata(metadata: dict, details: dict[str, str]) -> None:
+    config = metadata.get("config")
+    if isinstance(config, dict):
+        json_size = config.get("json_size")
+        keyslots_size = config.get("keyslots_size")
+        if json_size is not None:
+            details["json_metadata_size_bytes"] = sanitize_text(str(json_size))
+        if keyslots_size is not None:
+            details["keyslots_area_size_bytes"] = sanitize_text(str(keyslots_size))
+
+    keyslots = metadata.get("keyslots")
+    if isinstance(keyslots, dict):
+        details["keyslot_count"] = str(len(keyslots))
+        details["keyslots"] = ", ".join(sorted(str(key) for key in keyslots.keys())[:8])
+        first_keyslot = next(iter(keyslots.values()), None)
+        if isinstance(first_keyslot, dict):
+            kdf = first_keyslot.get("kdf")
+            if isinstance(kdf, dict):
+                copy_luks2_json_value(kdf, details, "time", "kdf_time")
+                copy_luks2_json_value(kdf, details, "memory", "kdf_memory")
+                copy_luks2_json_value(kdf, details, "cpus", "kdf_cpus")
+                copy_luks2_json_value(kdf, details, "iterations", "kdf_iterations")
+                salt = kdf.get("salt")
+                if isinstance(salt, str):
+                    details["kdf_salt"] = sanitize_text(salt)
+            af = first_keyslot.get("af")
+            if isinstance(af, dict):
+                copy_luks2_json_value(af, details, "type", "af_type")
+                copy_luks2_json_value(af, details, "stripes", "af_stripes")
+                copy_luks2_json_value(af, details, "hash", "af_hash")
+            area = first_keyslot.get("area")
+            if isinstance(area, dict):
+                copy_luks2_json_value(area, details, "type", "keyslot_area_type")
+                copy_luks2_json_value(area, details, "offset", "keyslot_area_offset")
+                copy_luks2_json_value(area, details, "size", "keyslot_area_size")
+                copy_luks2_json_value(area, details, "encryption", "keyslot_area_encryption")
+                copy_luks2_json_value(area, details, "key_size", "keyslot_key_size")
+
+    segments = metadata.get("segments")
+    if isinstance(segments, dict):
+        details["segment_count"] = str(len(segments))
+        first_segment = next(iter(segments.values()), None)
+        if isinstance(first_segment, dict):
+            copy_luks2_json_value(first_segment, details, "offset", "data_offset")
+            copy_luks2_json_value(first_segment, details, "size", "data_size")
+            copy_luks2_json_value(first_segment, details, "sector_size", "sector_size")
+            copy_luks2_json_value(first_segment, details, "integrity", "integrity")
+
+    digests = metadata.get("digests")
+    if isinstance(digests, dict):
+        details["digest_count"] = str(len(digests))
+        first_digest = next(iter(digests.values()), None)
+        if isinstance(first_digest, dict):
+            copy_luks2_json_value(first_digest, details, "type", "digest_type")
+            copy_luks2_json_value(first_digest, details, "keyslots", "digest_keyslots")
+            copy_luks2_json_value(first_digest, details, "segments", "digest_segments")
+            copy_luks2_json_value(first_digest, details, "hash", "digest_hash")
+            copy_luks2_json_value(first_digest, details, "iterations", "digest_iterations")
+            salt = first_digest.get("salt")
+            if isinstance(salt, str):
+                details["digest_salt"] = sanitize_text(salt)
+
+    tokens = metadata.get("tokens")
+    if isinstance(tokens, dict):
+        details["token_count"] = str(len(tokens))
+
+
+def copy_luks2_json_value(source: dict, details: dict[str, str], key: str, target: str) -> None:
+    value = source.get(key)
+    if value is not None:
+        details[target] = sanitize_text(str(value))
+
+
 def parse_luks2_json_metadata(data: bytes) -> dict | None:
-    search_window = data[: min(len(data), 262144)]
+    header_size = 0
+    if len(data) >= 16:
+        header_size = struct.unpack_from(">Q", data, 8)[0]
+    if header_size > 4096 and header_size <= len(data):
+        search_window = data[4096:header_size]
+    else:
+        search_window = data[: min(len(data), 262144)]
     start = search_window.find(b"{")
     end = search_window.rfind(b"}")
     if start == -1 or end == -1 or end <= start:

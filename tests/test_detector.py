@@ -360,22 +360,59 @@ class DetectorTests(unittest.TestCase):
 
     def test_detects_luks2_and_extracts_json_fields(self) -> None:
         header = bytearray(8192)
-        header[0:6] = b"SKUL\xba\xbe"
+        header[0:6] = b"LUKS\xba\xbe"
         header[6:8] = struct.pack(">H", 2)
+        header[8:16] = struct.pack(">Q", 16384)
+        header[16:24] = struct.pack(">Q", 3)
+        header[24:30] = b"label\x00"
+        header[72:79] = b"sha256\x00"
+        header[168:205] = b"12345678-1234-5678-1234-567812345678"
         metadata = {
+            "config": {
+                "json_size": "12288",
+                "keyslots_size": "16744448",
+            },
             "segments": {
                 "0": {
                     "type": "crypt",
                     "encryption": "aes-xts-plain64",
+                    "offset": "16777216",
+                    "size": "dynamic",
                     "sector_size": 4096,
                 }
             },
             "keyslots": {
                 "0": {
+                    "area": {
+                        "type": "raw",
+                        "offset": "32768",
+                        "size": "258048",
+                        "encryption": "aes-xts-plain64",
+                        "key_size": 64,
+                    },
                     "kdf": {
                         "type": "argon2id",
                         "hash": "sha256",
+                        "time": 4,
+                        "memory": 1048576,
+                        "cpus": 4,
+                        "salt": "abc",
+                    },
+                    "af": {
+                        "type": "luks1",
+                        "stripes": 4000,
+                        "hash": "sha256",
                     }
+                }
+            },
+            "digests": {
+                "0": {
+                    "type": "pbkdf2",
+                    "keyslots": ["0"],
+                    "segments": ["0"],
+                    "hash": "sha256",
+                    "iterations": 1000,
+                    "salt": "digest-salt",
                 }
             },
         }
@@ -383,8 +420,18 @@ class DetectorTests(unittest.TestCase):
         header[4096 : 4096 + len(encoded)] = encoded
         report = inspect_bytes(bytes(header))
         self.assertEqual(report.detections[0].label, "LUKS2 container")
+        self.assertEqual(report.detections[0].details["header_magic"], "primary")
+        self.assertEqual(report.detections[0].details["header_size_bytes"], "16384")
+        self.assertEqual(report.detections[0].details["sequence_id"], "3")
+        self.assertEqual(report.detections[0].details["label"], "label")
+        self.assertEqual(report.detections[0].details["uuid"], "12345678-1234-5678-1234-567812345678")
         self.assertEqual(report.detections[0].details["encryption_algorithm"], "aes-xts-plain64")
         self.assertEqual(report.detections[0].details["kdf"], "argon2id")
+        self.assertEqual(report.detections[0].details["kdf_memory"], "1048576")
+        self.assertEqual(report.detections[0].details["af_stripes"], "4000")
+        self.assertEqual(report.detections[0].details["digest_iterations"], "1000")
+        text = render_text(report.to_dict())
+        self.assertIn("Password Recovery: Supported by Hashcat and John the Ripper", text)
 
     def test_detects_encrypted_pdf(self) -> None:
         payload = (
@@ -540,8 +587,8 @@ class DetectorTests(unittest.TestCase):
         self.assertIn("Compression: LZMA2", text)
         self.assertIn("Header Encrypted: No", text)
         self.assertIn("Password Recovery: Supported by Hashcat and John the Ripper", text)
-        self.assertIn("Algorithm Summary", text)
-        self.assertIn("Format Matches", text)
+        self.assertNotIn("Algorithm Summary", text)
+        self.assertIn("Detection Details", text)
         self.assertIn("Heuristics", text)
         self.assertNotIn("Analysis Guidance", text)
 

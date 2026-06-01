@@ -11,12 +11,18 @@ from .detectors import inspect_file
 
 PASSWORD_RECOVERY_SUPPORT = {
     "7z archive": "Supported by Hashcat and John the Ripper",
+    "ASCII-armored OpenPGP message": "Supported by Hashcat and John the Ripper for password-based OpenPGP files",
+    "BitLocker volume": "Supported by Hashcat and John the Ripper when BitLocker metadata can be extracted",
     "Encrypted Microsoft Office document": "Supported by Hashcat and John the Ripper",
     "Encrypted PDF document": "Supported by Hashcat and John the Ripper",
     "KeePass KDB database": "Supported by Hashcat and John the Ripper",
     "KeePass KDBX database": "Supported by Hashcat and John the Ripper",
+    "LUKS1 container": "Supported by Hashcat and John the Ripper",
+    "LUKS2 container": "Supported by Hashcat and John the Ripper",
     "OpenSSH private key": "Supported by Hashcat and John the Ripper",
+    "OpenSSL salted blob": "Supported by Hashcat and John the Ripper when the cipher and KDF settings are known",
     "PKCS#12 / PFX container": "Supported by Hashcat and John the Ripper",
+    "Probable binary OpenPGP packet stream": "Supported by Hashcat and John the Ripper for password-based OpenPGP files",
     "RAR archive": "Supported by Hashcat and John the Ripper for many RAR variants",
     "ZIP archive with WinZip AES": "Supported by John the Ripper; Hashcat support varies by ZIP variant",
     "Encrypted ZIP archive": "Supported by John the Ripper; Hashcat support varies by ZIP variant",
@@ -104,27 +110,28 @@ def render_text(report: dict, style: Style | None = None) -> str:
         for detail_label, value in encryption_details:
             lines.append(f"  {detail_label}: {value}")
 
-    if algorithm_summary:
+    if algorithm_summary and not encryption_details:
         lines.extend(["", section(styler, "Algorithm Summary")])
         for item in algorithm_summary:
             lines.append(f"- {item}")
 
     detections = report["detections"]
-    lines.extend(["", section(styler, "Format Matches")])
+    hidden_detail_keys = summarized_detail_keys(encryption_details)
+    lines.extend(["", section(styler, "Detection Details")])
     if detections:
-        lines.extend(render_findings(detections, styler))
+        lines.extend(render_findings(detections, styler, hidden_detail_keys))
     else:
         lines.append("- No known format matched.")
 
     heuristics = report.get("heuristics", [])
     if heuristics:
         lines.extend(["", section(styler, "Heuristics")])
-        lines.extend(render_findings(heuristics, styler))
+        lines.extend(render_findings(heuristics, styler, set()))
 
     sidecar_hints = report.get("sidecar_hints", [])
     if sidecar_hints:
         lines.extend(["", section(styler, "Sidecar Hints")])
-        lines.extend(render_findings(sidecar_hints, styler))
+        lines.extend(render_findings(sidecar_hints, styler, set()))
 
     if analysis_guidance:
         lines.extend(["", section(styler, "Analysis Guidance")])
@@ -132,7 +139,7 @@ def render_text(report: dict, style: Style | None = None) -> str:
             lines.append(f"- {item}")
 
     notes = report["notes"]
-    if notes:
+    if notes and not detections:
         lines.extend(["", section(styler, "Notes")])
         for note in notes:
             lines.append(f"- {note}")
@@ -140,15 +147,70 @@ def render_text(report: dict, style: Style | None = None) -> str:
     return "\n".join(lines)
 
 
-def render_findings(findings: list[dict], styler: Style) -> list[str]:
+def render_findings(findings: list[dict], styler: Style, hidden_keys: set[str]) -> list[str]:
     lines: list[str] = []
     for finding in findings:
         badge = confidence_badge(styler, finding["confidence"])
         lines.append(f"- {styler.bold(finding['label'])} {badge}")
         lines.append(f"  {finding['rationale']}")
         for key, value in finding["details"].items():
-            lines.append(f"  {key}: {value}")
+            if key in hidden_keys:
+                continue
+            lines.append(f"  {format_detail_key(key)}: {format_detail_value(value)}")
     return lines
+
+
+def summarized_detail_keys(encryption_details: list[tuple[str, str]]) -> set[str]:
+    if not encryption_details:
+        return set()
+
+    return {
+        "payload_encryption",
+        "encryption_algorithm",
+        "kdf",
+        "kdf_hash",
+        "kdf_iterations",
+        "kdf_time",
+        "kdf_memory",
+        "kdf_cpus",
+        "kdf_salt_length",
+        "kdf_salt_offset",
+        "kdf_salt_end",
+        "compression_method",
+        "compression_methods",
+        "cipher_chunk",
+        "cipher_chunk_offset",
+        "encrypted_password_verifier",
+        "encrypted_password_verifier_offset",
+        "sector_size",
+        "data_offset",
+        "keyslot_count",
+        "header_encrypted",
+    }
+
+
+def format_detail_key(key: str) -> str:
+    acronyms = {
+        "af": "AF",
+        "cpu": "CPU",
+        "cpus": "CPUs",
+        "id": "ID",
+        "iv": "IV",
+        "json": "JSON",
+        "kdf": "KDF",
+        "pbkdf": "PBKDF",
+        "prf": "PRF",
+        "uuid": "UUID",
+    }
+    words = key.replace("_", " ").split()
+    return " ".join(acronyms.get(word, word.capitalize()) for word in words)
+
+
+def format_detail_value(value: object) -> str:
+    text = str(value)
+    if len(text) <= 160:
+        return text
+    return f"{text[:96]}...{text[-32:]} ({len(text)} chars)"
 
 
 def summarize_algorithms(detections: list[dict]) -> list[str]:
@@ -215,6 +277,16 @@ def normalize_encryption_details(label_name: str, details: dict[str, str]) -> li
     if "kdf_iterations" in details:
         rows.append(("KDF Iterations", details["kdf_iterations"]))
 
+    luks_kdf_parts = []
+    if "kdf_time" in details:
+        luks_kdf_parts.append(f"time={details['kdf_time']}")
+    if "kdf_memory" in details:
+        luks_kdf_parts.append(f"memory={details['kdf_memory']}")
+    if "kdf_cpus" in details:
+        luks_kdf_parts.append(f"cpus={details['kdf_cpus']}")
+    if luks_kdf_parts:
+        rows.append(("KDF Parameters", ", ".join(luks_kdf_parts)))
+
     if "kdf_salt_length" in details:
         salt_summary = f"{details['kdf_salt_length']} bytes"
         if "kdf_salt_offset" in details and "kdf_salt_end" in details:
@@ -236,6 +308,13 @@ def normalize_encryption_details(label_name: str, details: dict[str, str]) -> li
         if "encrypted_password_verifier_offset" in details:
             verifier_summary += f" at {details['encrypted_password_verifier_offset']}"
         rows.append(("Encrypted Password Verifier", verifier_summary))
+
+    if "sector_size" in details:
+        rows.append(("Sector Size", details["sector_size"]))
+    if "data_offset" in details:
+        rows.append(("Data Offset", details["data_offset"]))
+    if "keyslot_count" in details:
+        rows.append(("Keyslots", details["keyslot_count"]))
 
     header_encrypted = details.get("header_encrypted")
     if header_encrypted == "yes":
